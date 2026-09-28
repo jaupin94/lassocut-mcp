@@ -11,6 +11,29 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      # Fails the run before anything is built or published if the tag drifts from any of the
+      # version fields the release depends on.
+      - name: Check version consistency
+        run: |
+          node -e '
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            const pkg = require("./package.json").version;
+            const manifest = require("./manifest.json").version;
+            const server = require("./server.json");
+            const versions = {
+              "tag": tag,
+              "package.json": pkg,
+              "manifest.json": manifest,
+              "server.json .version": server.version,
+              "server.json .packages[0].version": server.packages[0].version,
+            };
+            const mismatched = Object.entries(versions).filter(([, v]) => v !== tag);
+            if (mismatched.length) {
+              console.error("Version mismatch against tag " + tag + ":", JSON.stringify(versions, null, 2));
+              process.exit(1);
+            }
+            console.log("Versions match tag " + tag + ":", JSON.stringify(versions));
+          '
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -20,6 +43,7 @@ jobs:
       # skipped when this version is already on npm (the very first release is published by hand)
       - run: npm view "lassocut-mcp@${GITHUB_REF_NAME#v}" version || npm publish --provenance --access public
       - run: npm ci --omit=dev && npx -y @anthropic-ai/mcpb@2 pack . lassocut.mcpb
-      - run: gh release create "$GITHUB_REF_NAME" lassocut.mcpb --title "$GITHUB_REF_NAME" --notes "LassoCut MCP server $GITHUB_REF_NAME"
+      # Idempotent: create the release, or (if it already exists, e.g. a re-run) upload/replace the asset instead.
+      - run: gh release create "$GITHUB_REF_NAME" lassocut.mcpb --title "$GITHUB_REF_NAME" --notes "LassoCut MCP server $GITHUB_REF_NAME" || gh release upload "$GITHUB_REF_NAME" lassocut.mcpb --clobber
         env:
           GH_TOKEN: ${{ github.token }}

@@ -18,6 +18,8 @@ By default, every image is processed as a low-cost **preview** (0.25 credit, 50 
 claude mcp add lassocut -- npx -y lassocut-mcp
 ```
 
+On Windows: `claude mcp add lassocut -- cmd /c npx -y lassocut-mcp`
+
 **Cursor / Windsurf** (or any other MCP client that reads a JSON config):
 
 ```json
