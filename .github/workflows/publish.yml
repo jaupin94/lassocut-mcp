@@ -17,7 +17,8 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm test
-      - run: npm publish --provenance --access public
+      # skipped when this version is already on npm (the very first release is published by hand)
+      - run: npm view "lassocut-mcp@${GITHUB_REF_NAME#v}" version || npm publish --provenance --access public
       - run: npm ci --omit=dev && npx -y @anthropic-ai/mcpb@2 pack . lassocut.mcpb
       - run: gh release create "$GITHUB_REF_NAME" lassocut.mcpb --title "$GITHUB_REF_NAME" --notes "LassoCut MCP server $GITHUB_REF_NAME"
         env:
