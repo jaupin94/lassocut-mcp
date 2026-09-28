@@ -19,6 +19,11 @@ test("confirmation message states cost and balance", () => {
     "Full size costs 1 credit per image: 12 images = 12 credits. Balance: 30 credits. Ask the user to confirm, then call again with confirm_cost: true.");
 });
 
+test("confirmation message says 'unknown' when the balance could not be read", () => {
+  assert.equal(confirmationMessage(12, null),
+    "Full size costs 1 credit per image: 12 images = 12 credits. Balance: unknown. Ask the user to confirm, then call again with confirm_cost: true.");
+});
+
 test("not enough credits for full size is refused before sending", () => {
   assert.equal(notEnough({ size: "full", count: 5, balance: 3 }),
     "Not enough credits: 3 left, 5 needed. Buy a pack at https://www.lassocut.com/account/ or use size: preview.");

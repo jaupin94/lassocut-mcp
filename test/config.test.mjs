@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { configPath, findKey, saveKey, apiUrl, DEFAULT_API_URL } from "../src/config.js";
 
@@ -44,6 +44,15 @@ test("saveKey writes the same JSON shape as lassocut login", async () => {
   const env = { LASSOCUT_CONFIG: path.join(dir, "sub", "c.json") };
   const file = await saveKey("k1", env);
   assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { api_key: "k1" });
+});
+
+test("saveKey merges into an existing config instead of overwriting other fields", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "lc-"));
+  const file = path.join(dir, "c.json");
+  await writeFile(file, JSON.stringify({ other_field: "keep-me", api_key: "old" }));
+  const env = { LASSOCUT_CONFIG: file };
+  await saveKey("newkey", env);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { other_field: "keep-me", api_key: "newkey" });
 });
 
 test("apiUrl: default and override without trailing slash", () => {

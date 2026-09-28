@@ -11,7 +11,8 @@ export function needsConfirmation({ size, count, confirm }) {
 }
 
 export function confirmationMessage(count, balance) {
-  return `Full size costs 1 credit per image: ${count} images = ${count} credits. Balance: ${balance} credits. Ask the user to confirm, then call again with confirm_cost: true.`;
+  const bal = balance == null ? "unknown" : `${balance} credits`;
+  return `Full size costs 1 credit per image: ${count} images = ${count} credits. Balance: ${bal}. Ask the user to confirm, then call again with confirm_cost: true.`;
 }
 
 export function notEnough({ size, count, balance }) {

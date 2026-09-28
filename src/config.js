@@ -3,7 +3,7 @@
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 export const DEFAULT_API_URL = "https://api.lassocut.com/v1.0";
 
@@ -32,7 +32,9 @@ export function findKey(env = process.env, platform = process.platform) {
 export async function saveKey(key, env = process.env, platform = process.platform) {
   const file = configPath(env, platform);
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify({ api_key: key }, null, 2), { mode: 0o600 });
+  let existing = {};
+  try { existing = JSON.parse(await readFile(file, "utf8")); } catch { /* no config yet, or unreadable: start fresh */ }
+  await writeFile(file, JSON.stringify({ ...existing, api_key: key }, null, 2), { mode: 0o600 });
   return file;
 }
 

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, stat } from "node:fs/promises";
 import { expandImages } from "../src/inputs.js";
 
 async function tree() {
@@ -32,4 +32,24 @@ test("URLs, missing files, non-images and duplicates", async () => {
   const r = await expandImages(["https://ex.com/p.jpg", f, f, path.join(photos, "nope.png"), path.join(photos, "notes.txt")]);
   assert.deepEqual(r.items, [{ kind: "url", source: "https://ex.com/p.jpg" }, { kind: "file", source: f }]);
   assert.deepEqual(r.skipped.map((s) => s.reason), ["file not found", "not an image"]);
+});
+
+test("a file over 22 MB is skipped before being read, not sent", async () => {
+  const { photos } = await tree();
+  const big = path.join(photos, "huge.jpg");
+  await writeFile(big, "x");
+  const statFile = async (p) => (p === big ? { isDirectory: () => false, size: 23 * 1024 * 1024 } : stat(p));
+  const r = await expandImages([big], { statFile });
+  assert.deepEqual(r.items, []);
+  assert.deepEqual(r.skipped, [{ source: big, reason: "file too large (max 22 MB)" }]);
+});
+
+test("an oversized file inside a folder is skipped, the others in the folder are not", async () => {
+  const { photos } = await tree();
+  const big = path.join(photos, "z-huge.png");
+  await writeFile(big, "x");
+  const statFile = async (p) => (p === big ? { isDirectory: () => false, size: 23 * 1024 * 1024 } : stat(p));
+  const r = await expandImages(photos, { statFile });
+  assert.deepEqual(r.items.map((i) => path.basename(i.source)), ["a.JPG", "b.png"]);
+  assert.ok(r.skipped.some((s) => path.basename(s.source) === "z-huge.png" && s.reason === "file too large (max 22 MB)"));
 });
