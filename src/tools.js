@@ -31,7 +31,8 @@ export function defaultOpenUrl(url) {
 }
 
 export function createHandlers({ env = process.env, makeApi = createApi, openUrl = defaultOpenUrl,
-  sleep = (ms) => new Promise((r) => setTimeout(r, ms)), home = os.homedir(), version = "1.0.0" } = {}) {
+  sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }),
+  home = os.homedir(), version = "1.0.0" } = {}) {
   const api = (key) => makeApi({ apiUrl: apiUrl(env), apiKey: key, version });
   // A device-code sign-in in progress: { url, code, promise }. Only one at a time; the promise
   // resolves (and clears this) once the background poll is approved, denied, expired, or times out.

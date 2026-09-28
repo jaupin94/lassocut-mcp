@@ -226,6 +226,26 @@ test("sign_in with an existing key does nothing unless force", async () => {
   assert.match(text(r), /Note: LASSOCUT_API_KEY is set and takes precedence\./);
 });
 
+test("the default sleep timer is unref'd so a background sign-in poll cannot keep the process alive", async () => {
+  const { dir } = await setup();
+  const env = { LASSOCUT_CONFIG: path.join(dir, "unref.json") };
+  const timers = [];
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms) => { const t = realSetTimeout(fn, ms); timers.push(t); return t; };
+  try {
+    const make = () => ({
+      connectStart: async () => ({ device_code: "d", user_code: "UNRF-0000", verification_url: "https://www.lassocut.com/connect/?code=UNRF-0000", interval: 0, expires_in: 600 }),
+      connectPoll: async () => ({ status: "denied" }),
+    });
+    // No sleep override here: this exercises the real default.
+    await createHandlers({ env, makeApi: make, openUrl: () => {} }).signIn({});
+  } finally {
+    global.setTimeout = realSetTimeout;
+  }
+  assert.ok(timers.length > 0, "expected the default sleep to schedule a timer");
+  for (const t of timers) assert.equal(t.hasRef(), false, "the sleep timer must be unref'd");
+});
+
 test("sign_in with force still notes that LASSOCUT_API_KEY takes precedence over a newly saved key", async () => {
   const { dir } = await setup();
   const env = { LASSOCUT_CONFIG: path.join(dir, "new4.json"), LASSOCUT_API_KEY: "envkey" };

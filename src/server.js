@@ -8,9 +8,12 @@ import { createHandlers } from "./tools.js";
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-serveStdio(() => {
+// Created once for the life of the process (not per connection): sign-in state (the pending
+// device-code poll) must survive and keep polling even if a client disconnects and reconnects.
+const h = createHandlers({ version });
+
+function createServer(h) {
   const server = new McpServer({ name: "lassocut", version });
-  const h = createHandlers({ version });
 
   server.registerTool("remove_background", {
     description: "Remove the background of images with LassoCut. Accepts file paths, folders (their images, not subfolders) or http(s) URLs, up to 50 per call. Saves '<name>-no-bg.<ext>' next to each original (or in output_dir) and never overwrites. Uses size 'preview' (0.25 credit, 50 free per month) unless the user explicitly asks for full size.",
@@ -36,4 +39,6 @@ serveStdio(() => {
   }, (args) => h.signIn(args));
 
   return server;
-});
+}
+
+serveStdio(() => createServer(h));
