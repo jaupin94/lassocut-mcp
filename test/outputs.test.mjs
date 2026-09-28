@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { outputPathFor } from "../src/outputs.js";
+import { outputPathFor, resolveOutputDir } from "../src/outputs.js";
 
 const none = () => false;
 
@@ -27,19 +27,40 @@ test("same name twice in one batch with output_dir gives two files", () => {
   assert.deepEqual([a, b], [path.join("out", "photo-no-bg.jpg"), path.join("out", "photo-no-bg-2.jpg")]);
 });
 
-test("a URL is named from its last path part and saved in output_dir or cwd", () => {
-  const opts = { format: "webp", cwd: "work", taken: new Set(), exists: none };
+test("a URL without output_dir is named from its last path part and saved in the home folder (no Downloads here)", () => {
+  const opts = { format: "webp", home: "home", taken: new Set(), exists: none };
   assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/img/shoe%20red.jpg?x=1" }, opts),
-    path.join("work", "shoe red-no-bg.webp"));
-  assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/" }, opts), path.join("work", "image-no-bg.webp"));
+    path.join("home", "shoe red-no-bg.webp"));
+  assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/" }, opts), path.join("home", "image-no-bg.webp"));
+});
+
+test("a URL without output_dir is saved in <home>/Downloads when that folder exists", () => {
+  const downloads = path.join("home", "Downloads");
+  const opts = { format: "png", home: "home", taken: new Set(), exists: (p) => p === downloads };
+  assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/a.jpg" }, opts), path.join(downloads, "a-no-bg.png"));
 });
 
 test("an encoded slash or backslash in a URL name is sanitized before path parsing, not read as a separator", () => {
-  const opts = () => ({ format: "png", cwd: "work", taken: new Set(), exists: none });
+  const opts = () => ({ format: "png", home: "home", taken: new Set(), exists: none });
   assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/a%2Fb.jpg" }, opts()),
-    path.join("work", "a_b-no-bg.png"));
+    path.join("home", "a_b-no-bg.png"));
   assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/a%5Cb.jpg" }, opts()),
-    path.join("work", "a_b-no-bg.png"));
+    path.join("home", "a_b-no-bg.png"));
+});
+
+test("resolveOutputDir expands a leading ~ to the home folder", () => {
+  assert.equal(resolveOutputDir("~", "/home/j"), "/home/j");
+  assert.equal(resolveOutputDir("~/out", "/home/j"), path.join("/home/j", "out"));
+  assert.equal(resolveOutputDir(null, "/home/j"), null);
+});
+
+test("resolveOutputDir refuses a relative path", () => {
+  assert.throws(() => resolveOutputDir("relative/dir", "/home/j"), /output_dir must be an absolute path/);
+  assert.throws(() => resolveOutputDir("out", "/home/j"), /output_dir must be an absolute path/);
+});
+
+test("resolveOutputDir accepts an absolute path unchanged", () => {
+  assert.equal(resolveOutputDir(path.resolve("/abs/out"), "/home/j"), path.resolve("/abs/out"));
 });
 
 test("the base name is capped at 100 characters", () => {
