@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
-import { mkdtemp, mkdir, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, stat, readdir } from "node:fs/promises";
 import { expandImages } from "../src/inputs.js";
 
 async function tree() {
@@ -52,4 +52,33 @@ test("an oversized file inside a folder is skipped, the others in the folder are
   const r = await expandImages(photos, { statFile });
   assert.deepEqual(r.items.map((i) => path.basename(i.source)), ["a.JPG", "b.png"]);
   assert.ok(r.skipped.some((s) => path.basename(s.source) === "z-huge.png" && s.reason === "file too large (max 22 MB)"));
+});
+
+test("a stat error other than not-found (e.g. EACCES) on a file is skipped, not thrown", async () => {
+  const { photos } = await tree();
+  const f = path.join(photos, "a.JPG");
+  const eacces = Object.assign(new Error("permission denied"), { code: "EACCES" });
+  const statFile = async (p) => { if (p === f) throw eacces; return stat(p); };
+  const r = await expandImages([f], { statFile });
+  assert.deepEqual(r.items, []);
+  assert.deepEqual(r.skipped, [{ source: f, reason: "cannot read" }]);
+});
+
+test("a stat error on a folder path itself is skipped, not thrown; other sources still processed", async () => {
+  const { photos } = await tree();
+  const other = path.join(photos, "a.JPG");
+  const eacces = Object.assign(new Error("permission denied"), { code: "EACCES" });
+  const statFile = async (p) => { if (p === photos) throw eacces; return stat(p); };
+  const r = await expandImages([photos, other], { statFile });
+  assert.deepEqual(r.items, [{ kind: "file", source: other }]);
+  assert.ok(r.skipped.some((s) => s.source === photos && s.reason === "cannot read"));
+});
+
+test("a readdir error on a folder is skipped, not thrown", async () => {
+  const { photos } = await tree();
+  const eacces = Object.assign(new Error("permission denied"), { code: "EACCES" });
+  const readDir = async (p, opts) => { if (p === photos) throw eacces; return readdir(p, opts); };
+  const r = await expandImages([photos], { readDir });
+  assert.deepEqual(r.items, []);
+  assert.deepEqual(r.skipped, [{ source: photos, reason: "cannot read" }]);
 });

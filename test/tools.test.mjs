@@ -47,7 +47,9 @@ test("preview by default, file written next to original, credits summed, fields 
   assert.equal(api.calls[0].fields.bg_color, "ffffff");
   assert.equal(api.calls[0].fields.crop, "true");
   assert.equal(api.calls[0].fields.format, "jpg");
-  assert.notEqual(api.calls[0].idempotencyKey, api.calls[1].idempotencyKey);
+  // Content-derived: both files are byte-identical copies of the same fixture processed with the
+  // same fields, so they intentionally share one idempotency key.
+  assert.equal(api.calls[0].idempotencyKey, api.calls[1].idempotencyKey);
   assert.ok(existsSync(files[0].replace(/\.jpg$/, "-no-bg.jpg")));
   assert.match(text(r), /Credits charged: 0\.5/);
   assert.equal(r.isError, undefined);
@@ -163,6 +165,119 @@ test("a name that appears during the API call (a race) is not overwritten; the n
   assert.equal(await readFile(expectedFirst, "utf8"), "raced-content");
   assert.ok(existsSync(expectedSecond));
   assert.ok(text(r).includes(path.basename(expectedSecond)));
+  assert.equal(r.isError, undefined);
+});
+
+test("idempotency key: same file + same fields → same key across calls", async () => {
+  const { files, env } = await setup(1);
+  const api = fakeApi({ png: await readFile(FIX) });
+  const h = createHandlers({ env, makeApi: api.make });
+  await h.removeBackground({ images: files[0] });
+  await h.removeBackground({ images: files[0] });
+  assert.equal(api.calls.length, 2);
+  assert.equal(api.calls[0].idempotencyKey, api.calls[1].idempotencyKey);
+});
+
+test("idempotency key: same file, different fields → different key", async () => {
+  const { files, env } = await setup(1);
+  const api = fakeApi({ png: await readFile(FIX) });
+  const h = createHandlers({ env, makeApi: api.make });
+  await h.removeBackground({ images: files[0], format: "png" });
+  await h.removeBackground({ images: files[0], format: "jpg" });
+  assert.notEqual(api.calls[0].idempotencyKey, api.calls[1].idempotencyKey);
+});
+
+test("idempotency key: two files with different content, same fields → different keys", async () => {
+  const { files, env } = await setup(2);
+  await writeFile(files[1], Buffer.concat([await readFile(files[1]), Buffer.from("extra")]));
+  const api = fakeApi({ png: await readFile(FIX) });
+  const h = createHandlers({ env, makeApi: api.make });
+  await h.removeBackground({ images: files });
+  assert.notEqual(api.calls[0].idempotencyKey, api.calls[1].idempotencyKey);
+});
+
+test("idempotency key: a URL image derives its key from the URL string, stable across calls", async () => {
+  const { dir, env } = await setup();
+  const api = fakeApi({ png: await readFile(FIX) });
+  const h = createHandlers({ env, makeApi: api.make, home: dir });
+  await h.removeBackground({ images: "https://ex.com/a.jpg" });
+  await h.removeBackground({ images: "https://ex.com/a.jpg" });
+  await h.removeBackground({ images: "https://ex.com/b.jpg" });
+  assert.equal(api.calls[0].idempotencyKey, api.calls[1].idempotencyKey);
+  assert.notEqual(api.calls[1].idempotencyKey, api.calls[2].idempotencyKey);
+});
+
+test("a pre-aborted signal skips every image as cancelled and makes no API call", async () => {
+  const { files, env } = await setup(3);
+  const controller = new AbortController();
+  controller.abort();
+  const api = fakeApi({ png: await readFile(FIX) });
+  const r = await createHandlers({ env, makeApi: api.make }).removeBackground({ images: files }, { mcpReq: { signal: controller.signal } });
+  assert.equal(api.calls.length, 0);
+  assert.match(text(r), /p0\.jpg: skipped — cancelled/);
+  assert.match(text(r), /p1\.jpg: skipped — cancelled/);
+  assert.match(text(r), /p2\.jpg: skipped — cancelled/);
+  assert.equal(r.isError, true);
+});
+
+test("an abort raised mid-batch stops before the next image; already-processed images keep their result", async () => {
+  const { files, env } = await setup(3);
+  const controller = new AbortController();
+  const png = await readFile(FIX);
+  let n = 0;
+  const make = () => ({
+    async removeBackground() { n++; if (n === 1) controller.abort(); return { bytes: png, credits: 0.25 }; },
+    async account() { return { credits: 100, freePreviews: 50 }; },
+  });
+  const r = await createHandlers({ env, makeApi: make }).removeBackground({ images: files }, { mcpReq: { signal: controller.signal } });
+  const t = text(r);
+  assert.match(t, /p0\.jpg →/);
+  assert.match(t, /p1\.jpg: skipped — cancelled/);
+  assert.match(t, /p2\.jpg: skipped — cancelled/);
+  assert.equal(n, 1);
+  assert.equal(r.isError, undefined);
+});
+
+test("progress notifications are sent per image when the request carries a progressToken", async () => {
+  const { files, env } = await setup(2);
+  const api = fakeApi({ png: await readFile(FIX) });
+  const sent = [];
+  const extra = { mcpReq: { _meta: { progressToken: "tok1" }, notify: async (n) => { sent.push(n); } } };
+  await createHandlers({ env, makeApi: api.make }).removeBackground({ images: files }, extra);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].method, "notifications/progress");
+  assert.equal(sent[0].params.progressToken, "tok1");
+  assert.deepEqual(sent.map((n) => [n.params.progress, n.params.total]), [[1, 2], [2, 2]]);
+  assert.match(sent[1].params.message, /2\/2 images/);
+});
+
+test("no progress notifications are sent when the request carries no progressToken", async () => {
+  const { files, env } = await setup(1);
+  const api = fakeApi({ png: await readFile(FIX) });
+  let called = false;
+  const extra = { mcpReq: { notify: async () => { called = true; } } };
+  await createHandlers({ env, makeApi: api.make }).removeBackground({ images: files[0] }, extra);
+  assert.equal(called, false);
+});
+
+test("a 402 mid-batch stops further calls; remaining images are reported skipped — not enough credits", async () => {
+  const { files, env } = await setup(3);
+  const png = await readFile(FIX);
+  let n = 0;
+  const make = () => ({
+    async removeBackground() {
+      n++;
+      if (n === 2) throw new ApiError(402, "Not enough credits. Buy a pack at https://www.lassocut.com/account/ or use size: preview.");
+      return { bytes: png, credits: 0.25 };
+    },
+    async account() { return { credits: 100, freePreviews: 50 }; },
+  });
+  const r = await createHandlers({ env, makeApi: make }).removeBackground({ images: files });
+  const t = text(r);
+  assert.match(t, /p0\.jpg →/);
+  assert.match(t, /p1\.jpg: failed — Not enough credits/);
+  assert.match(t, /p2\.jpg: skipped — not enough credits/);
+  assert.equal(n, 2);
   assert.equal(r.isError, undefined);
 });
 

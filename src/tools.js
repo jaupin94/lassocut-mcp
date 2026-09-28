@@ -1,14 +1,14 @@
 // The three MCP tools. All spending rules live here and in guards.js, never in tool descriptions alone.
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, readFile, writeFile, mkdir } from "node:fs/promises";
 import { findKey, saveKey, apiUrl } from "./config.js";
 import { expandImages } from "./inputs.js";
 import { outputPathFor, resolveOutputDir } from "./outputs.js";
-import { createApi } from "./api.js";
+import { createApi, ApiError } from "./api.js";
 import { tooMany, needsConfirmation, confirmationMessage, notEnough } from "./guards.js";
 import { thumbnail } from "./thumb.js";
 
@@ -39,7 +39,16 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
   let pending = null;
 
   async function removeBackground({ images, size = "preview", background = "transparent", format = "png",
-    crop = false, output_dir, confirm_cost = false }) {
+    crop = false, output_dir, confirm_cost = false }, extra = {}) {
+    const signal = extra?.mcpReq?.signal;
+    const progressToken = extra?.mcpReq?._meta?.progressToken;
+    const notify = extra?.mcpReq?.notify;
+    const sendProgress = async (done, total) => {
+      if (progressToken == null || typeof notify !== "function") return;
+      try {
+        await notify({ method: "notifications/progress", params: { progressToken, progress: done, total, message: `${done}/${total} images` } });
+      } catch { /* best-effort: a failed progress notification must not affect the result */ }
+    };
     if (size !== "preview" && size !== "full") return say("size must be preview or full", true);
     const key = findKey(env);
     if (!key) return say(NO_KEY, true);
@@ -70,24 +79,32 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
     if (crop) fields.crop = "true";
     const taken = new Set(), lines = [], thumbs = [];
     let credits = 0, ok = 0;
-    for (const item of items) {
+
+    // Returns true when the batch must stop (not enough credits): the caller then marks the
+    // remaining, not-yet-attempted images as skipped rather than sending them.
+    async function processItem(item) {
       let out;
       try {
         out = outputPathFor(item, { format, outputDir, home, taken });
       } catch (e) {
         lines.push(`${item.source}: failed — ${e.message}`);
-        continue;
+        return false;
       }
       const dir = path.dirname(out);
       try {
         await mkdir(dir, { recursive: true });
       } catch {
         lines.push(`${item.source}: failed — cannot write to ${dir}`);
-        continue;
+        return false;
       }
       try {
         const file = item.kind === "file" ? { bytes: await readFile(item.source), name: path.basename(item.source) } : undefined;
-        const res = await client.removeBackground({ file, url: item.kind === "url" ? item.source : undefined, fields, idempotencyKey: randomUUID() });
+        // Content-derived: the same image + the same settings always produce the same key, so a
+        // retried tool call replays for free within the API's idempotency window instead of
+        // spending credits again.
+        const keyContent = item.kind === "file" ? file.bytes : Buffer.from(item.source, "utf8");
+        const idempotencyKey = createHash("sha256").update(keyContent).update(JSON.stringify(fields)).digest("hex").slice(0, 64);
+        const res = await client.removeBackground({ file, url: item.kind === "url" ? item.source : undefined, fields, idempotencyKey });
         credits += res.credits; // charged the instant the API answers, whatever happens to the local write next
         let target = out;
         for (;;) {
@@ -101,8 +118,24 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
         ok++;
         lines.push(`${item.source} → ${target}`);
         if (thumbs.length < MAX_THUMBS) { const t = await thumbnail(res.bytes); if (t) thumbs.push({ type: "image", ...t }); }
+        return false;
       } catch (e) {
         lines.push(`${item.source}: failed — ${e.message}`);
+        return e instanceof ApiError && e.status === 402;
+      }
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (signal?.aborted) {
+        for (let j = i; j < items.length; j++) lines.push(`${items[j].source}: skipped — cancelled`);
+        break;
+      }
+      const outOfCredits = await processItem(item);
+      await sendProgress(i + 1, items.length);
+      if (outOfCredits) {
+        for (let j = i + 1; j < items.length; j++) lines.push(`${items[j].source}: skipped — not enough credits`);
+        break;
       }
     }
     for (const s of skipped) lines.push(`${s.source}: skipped — ${s.reason}`);

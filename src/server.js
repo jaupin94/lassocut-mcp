@@ -26,7 +26,7 @@ function createServer(h) {
       output_dir: z.string().optional().describe("absolute path; default: next to each original, or your Downloads folder for URLs"),
       confirm_cost: z.boolean().optional().describe("Set to true only after the user confirmed the full-size cost"),
     }),
-  }, (args) => h.removeBackground(args));
+  }, (args, extra) => h.removeBackground(args, extra));
 
   server.registerTool("get_credits", {
     description: "Show the LassoCut credit balance and the free previews left this month.",
