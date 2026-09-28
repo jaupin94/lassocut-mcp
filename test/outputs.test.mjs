@@ -33,3 +33,18 @@ test("a URL is named from its last path part and saved in output_dir or cwd", ()
     path.join("work", "shoe red-no-bg.webp"));
   assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/" }, opts), path.join("work", "image-no-bg.webp"));
 });
+
+test("an encoded slash or backslash in a URL name is sanitized before path parsing, not read as a separator", () => {
+  const opts = () => ({ format: "png", cwd: "work", taken: new Set(), exists: none });
+  assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/a%2Fb.jpg" }, opts()),
+    path.join("work", "a_b-no-bg.png"));
+  assert.equal(outputPathFor({ kind: "url", source: "https://ex.com/a%5Cb.jpg" }, opts()),
+    path.join("work", "a_b-no-bg.png"));
+});
+
+test("the base name is capped at 100 characters", () => {
+  const long = "a".repeat(150);
+  const opts = { format: "png", taken: new Set(), exists: none };
+  const p = outputPathFor({ kind: "file", source: path.join("dir", `${long}.jpg`) }, opts);
+  assert.equal(path.basename(p), `${"a".repeat(100)}-no-bg.png`);
+});
