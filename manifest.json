@@ -4,7 +4,7 @@
   "display_name": "LassoCut",
   "version": "1.0.0",
   "description": "Remove image backgrounds from Claude with your LassoCut account.",
-  "long_description": "Ask Claude to cut out product photos, portraits or whole folders. Results are saved next to your originals. Previews by default (50 free per month); full size only when you ask, with the cost shown first. The API is compatible with the remove.bg API.",
+  "long_description": "Ask Claude to cut out product photos, portraits or whole folders. Results are saved next to your originals. Previews by default (50 free per month); full size only when you ask, and above 10 full-size images Claude must show the cost and get your OK first. The API is compatible with the remove.bg API.",
   "author": { "name": "JAUPIN Design LLC", "email": "contact@lassocut.com", "url": "https://www.lassocut.com/" },
   "homepage": "https://www.lassocut.com/mcp/",
   "support": "https://github.com/jaupin94/lassocut-mcp/issues",
