@@ -1,0 +1,40 @@
+{
+  "manifest_version": "0.3",
+  "name": "lassocut",
+  "display_name": "LassoCut",
+  "version": "1.0.0",
+  "description": "Remove image backgrounds from Claude with your LassoCut account.",
+  "long_description": "Ask Claude to cut out product photos, portraits or whole folders. Results are saved next to your originals. Previews by default (50 free per month); full size only when you ask, with the cost shown first. The API is compatible with the remove.bg API.",
+  "author": { "name": "JAUPIN Design LLC", "email": "contact@lassocut.com", "url": "https://www.lassocut.com/" },
+  "homepage": "https://www.lassocut.com/mcp/",
+  "support": "https://github.com/jaupin94/lassocut-mcp/issues",
+  "repository": { "type": "git", "url": "https://github.com/jaupin94/lassocut-mcp" },
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "src/server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/src/server.js"],
+      "env": { "LASSOCUT_API_KEY": "${user_config.api_key}" }
+    }
+  },
+  "tools": [
+    { "name": "remove_background", "description": "Remove the background of images (files, folders or URLs)" },
+    { "name": "get_credits", "description": "Show the LassoCut credit balance" },
+    { "name": "sign_in", "description": "Connect a LassoCut account in the browser" }
+  ],
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "LassoCut API key (optional)",
+      "description": "Leave empty and ask Claude to sign in, or paste a key from https://www.lassocut.com/account/",
+      "sensitive": true,
+      "required": false
+    }
+  },
+  "compatibility": { "platforms": ["darwin", "win32", "linux"], "runtimes": { "node": ">=20.0.0" } },
+  "keywords": ["background removal", "remove background", "images", "photos"],
+  "license": "MIT",
+  "privacy_policies": ["https://www.lassocut.com/legal/privacy/"]
+}

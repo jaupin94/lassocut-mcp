@@ -1,0 +1,24 @@
+# Publishes lassocut-mcp to npm (trusted publishing, no token) and attaches lassocut.mcpb to the GitHub release.
+name: Publish
+on:
+  push:
+    tags: ['v*.*.*']
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm test
+      - run: npm publish --provenance --access public
+      - run: npm ci --omit=dev && npx -y @anthropic-ai/mcpb@2 pack . lassocut.mcpb
+      - run: gh release create "$GITHUB_REF_NAME" lassocut.mcpb --title "$GITHUB_REF_NAME" --notes "LassoCut MCP server $GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}
