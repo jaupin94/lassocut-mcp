@@ -20,7 +20,7 @@ serveStdio(() => {
       background: z.string().optional().describe("'transparent' (default), a hex color like '#ffffff', or a color name"),
       format: z.enum(["png", "jpg", "webp"]).optional().describe("Output format, png by default"),
       crop: z.boolean().optional().describe("Crop to the subject"),
-      output_dir: z.string().optional().describe("Folder for the results (default: next to each original; current folder for URLs)"),
+      output_dir: z.string().optional().describe("absolute path; default: next to each original, or your Downloads folder for URLs"),
       confirm_cost: z.boolean().optional().describe("Set to true only after the user confirmed the full-size cost"),
     }),
   }, (args) => h.removeBackground(args));
@@ -31,7 +31,7 @@ serveStdio(() => {
   }, () => h.getCredits());
 
   server.registerTool("sign_in", {
-    description: "Connect a LassoCut account: opens the LassoCut approval page in the browser and waits up to 5 minutes. Use force: true to switch accounts.",
+    description: "Connect a LassoCut account: opens the LassoCut approval page in the browser and returns right away with the URL and code. Approval is saved automatically in the background (up to 5 minutes); call get_credits afterwards to check. Use force: true to switch accounts.",
     inputSchema: z.object({ force: z.boolean().optional() }),
   }, (args) => h.signIn(args));
 

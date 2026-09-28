@@ -1,33 +1,57 @@
 // The three MCP tools. All spending rules live here and in guards.js, never in tool descriptions alone.
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { access, readFile, writeFile, mkdir } from "node:fs/promises";
 import { findKey, saveKey, apiUrl } from "./config.js";
 import { expandImages } from "./inputs.js";
-import { outputPathFor } from "./outputs.js";
+import { outputPathFor, resolveOutputDir } from "./outputs.js";
 import { createApi } from "./api.js";
 import { tooMany, needsConfirmation, confirmationMessage, notEnough } from "./guards.js";
 import { thumbnail } from "./thumb.js";
 
 const NO_KEY = "No LassoCut account connected. Call sign_in, or set LASSOCUT_API_KEY.";
 const MAX_THUMBS = 3;
+// Never hand an unsafe string to the OS's URL opener; it is still returned in the text either way.
+const SAFE_URL = /^https?:\/\/[^\s"<>|^&%`]+$/;
+const ENV_KEY_NOTE = " Note: LASSOCUT_API_KEY is set and takes precedence.";
 const say = (text, isError) => (isError ? { content: [{ type: "text", text }], isError: true } : { content: [{ type: "text", text }] });
 
+function envKeyActive(env) {
+  const v = typeof env.LASSOCUT_API_KEY === "string" ? env.LASSOCUT_API_KEY.trim() : "";
+  return Boolean(v) && !v.startsWith("${");
+}
+
 export function defaultOpenUrl(url) {
-  const [cmd, args] = process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+  const [cmd, args] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
     : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
   try { spawn(cmd, args, { stdio: "ignore", detached: true }).unref(); } catch { /* the URL is also returned as text */ }
 }
 
 export function createHandlers({ env = process.env, makeApi = createApi, openUrl = defaultOpenUrl,
-  sleep = (ms) => new Promise((r) => setTimeout(r, ms)), cwd = process.cwd(), version = "1.0.0" } = {}) {
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)), home = os.homedir(), version = "1.0.0" } = {}) {
   const api = (key) => makeApi({ apiUrl: apiUrl(env), apiKey: key, version });
+  // A device-code sign-in in progress: { url, code, promise }. Only one at a time; the promise
+  // resolves (and clears this) once the background poll is approved, denied, expired, or times out.
+  let pending = null;
 
   async function removeBackground({ images, size = "preview", background = "transparent", format = "png",
     crop = false, output_dir, confirm_cost = false }) {
+    if (size !== "preview" && size !== "full") return say("size must be preview or full", true);
     const key = findKey(env);
     if (!key) return say(NO_KEY, true);
+    let outputDir;
+    try { outputDir = resolveOutputDir(output_dir, home); } catch (e) { return say(e.message, true); }
+    if (outputDir) {
+      try {
+        await mkdir(outputDir, { recursive: true });
+        await access(outputDir, fsConstants.W_OK);
+      } catch {
+        return say(`Cannot write to output_dir: ${outputDir}.`, true);
+      }
+    }
     const { items, skipped } = await expandImages(images);
     const limit = tooMany(items.length);
     if (limit) return say(limit, true);
@@ -36,7 +60,7 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
     if (size === "full") {
       let balance = null;
       try { balance = (await client.account()).credits; } catch { /* unknown balance: let the API decide */ }
-      if (needsConfirmation({ size, count: items.length, confirm: confirm_cost })) return say(confirmationMessage(items.length, balance ?? "unknown"), true);
+      if (needsConfirmation({ size, count: items.length, confirm: confirm_cost })) return say(confirmationMessage(items.length, balance), true);
       const low = notEnough({ size, count: items.length, balance });
       if (low) return say(low, true);
     }
@@ -46,14 +70,35 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
     const taken = new Set(), lines = [], thumbs = [];
     let credits = 0, ok = 0;
     for (const item of items) {
+      let out;
+      try {
+        out = outputPathFor(item, { format, outputDir, home, taken });
+      } catch (e) {
+        lines.push(`${item.source}: failed — ${e.message}`);
+        continue;
+      }
+      const dir = path.dirname(out);
+      try {
+        await mkdir(dir, { recursive: true });
+      } catch {
+        lines.push(`${item.source}: failed — cannot write to ${dir}`);
+        continue;
+      }
       try {
         const file = item.kind === "file" ? { bytes: await readFile(item.source), name: path.basename(item.source) } : undefined;
         const res = await client.removeBackground({ file, url: item.kind === "url" ? item.source : undefined, fields, idempotencyKey: randomUUID() });
-        const out = outputPathFor(item, { format, outputDir: output_dir, cwd, taken });
-        await mkdir(path.dirname(out), { recursive: true });
-        await writeFile(out, res.bytes);
-        credits += res.credits; ok++;
-        lines.push(`${item.source} → ${out}`);
+        credits += res.credits; // charged the instant the API answers, whatever happens to the local write next
+        let target = out;
+        for (;;) {
+          try { await writeFile(target, res.bytes, { flag: "wx" }); break; }
+          catch (e) {
+            if (e.code !== "EEXIST") throw e;
+            taken.add(target); // something else claimed this exact name since we computed it: try the next one
+            target = outputPathFor(item, { format, outputDir, home, taken });
+          }
+        }
+        ok++;
+        lines.push(`${item.source} → ${target}`);
         if (thumbs.length < MAX_THUMBS) { const t = await thumbnail(res.bytes); if (t) thumbs.push({ type: "image", ...t }); }
       } catch (e) {
         lines.push(`${item.source}: failed — ${e.message}`);
@@ -76,22 +121,34 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
   }
 
   async function signIn({ force = false } = {}) {
-    if (findKey(env) && !force) return say("Already signed in to LassoCut. Call sign_in with force: true to use another account.");
+    if (findKey(env) && !force) {
+      return say(`Already signed in to LassoCut. Call sign_in with force: true to use another account.${envKeyActive(env) ? ENV_KEY_NOTE : ""}`);
+    }
+    if (pending) {
+      return say(`Sign-in in progress: open ${pending.url} (code ${pending.code}).${envKeyActive(env) ? ENV_KEY_NOTE : ""}`);
+    }
     let start;
     try { start = await api("").connectStart(); } catch (e) { return say(e.message, true); }
-    openUrl(start.verification_url);
-    const deadline = Date.now() + Math.min(start.expires_in || 600, 300) * 1000;
-    while (Date.now() < deadline) {
-      await sleep((start.interval ?? 3) * 1000);
-      let got;
-      try { got = await api("").connectPoll(start.device_code); } catch { continue; }
-      if (got.status === "approved") {
-        await saveKey(got.api_key, env);
-        return say("Signed in to LassoCut. The key is saved for this connector and the lassocut command-line tool.");
-      }
-      if (got.status === "denied" || got.status === "expired") break;
-    }
-    return say(`The connection was not approved. Open ${start.verification_url} and enter the code ${start.user_code}, then call sign_in again.`, true);
+    if (SAFE_URL.test(start.verification_url)) openUrl(start.verification_url);
+
+    const current = { url: start.verification_url, code: start.user_code };
+    current.promise = (async () => {
+      try {
+        const deadline = Date.now() + Math.min(start.expires_in || 600, 300) * 1000;
+        const intervalMs = Math.max(start.interval ?? 3, 1) * 1000;
+        while (Date.now() < deadline) {
+          await sleep(intervalMs);
+          let got;
+          try { got = await api("").connectPoll(start.device_code); } catch { continue; }
+          if (got.status === "approved") { await saveKey(got.api_key, env); return; }
+          if (got.status === "denied" || got.status === "expired") return;
+        }
+      } catch { /* background sign-in failed silently: a fresh sign_in call starts a new attempt */ }
+      finally { if (pending === current) pending = null; }
+    })();
+    pending = current;
+
+    return say(`Open ${start.verification_url} and approve the connection (code ${start.user_code}). Then call get_credits to check.${envKeyActive(env) ? ENV_KEY_NOTE : ""}`);
   }
 
   return { removeBackground, getCredits, signIn };

@@ -91,11 +91,79 @@ test("guards: over 50 refused, full over 10 asks confirmation, low balance refus
   const { dir, env } = await setup();
   const many = Array.from({ length: 51 }, (_, i) => `https://ex.com/${i}.jpg`);
   const api = fakeApi({ balance: 3, png: Buffer.from("") });
-  const h = createHandlers({ env, makeApi: api.make, cwd: dir });
+  const h = createHandlers({ env, makeApi: api.make, home: dir });
   assert.match(text(await h.removeBackground({ images: many })), /Too many images \(51\)/);
   assert.match(text(await h.removeBackground({ images: many.slice(0, 11), size: "full" })), /11 images = 11 credits\. Balance: 3 credits/);
   assert.match(text(await h.removeBackground({ images: many.slice(0, 5), size: "full" })), /Not enough credits: 3 left, 5 needed/);
   assert.equal(api.calls.length, 0);
+});
+
+test("size other than preview or full is rejected before any call", async () => {
+  const { files, env } = await setup();
+  const api = fakeApi({ png: await readFile(FIX) });
+  const r = await createHandlers({ env, makeApi: api.make }).removeBackground({ images: files[0], size: "medium" });
+  assert.equal(r.isError, true);
+  assert.match(text(r), /size must be preview or full/);
+  assert.equal(api.calls.length, 0);
+});
+
+test("output_dir must be an absolute path", async () => {
+  const { files, env } = await setup();
+  const r = await createHandlers({ env, makeApi: () => { throw new Error("no call expected"); } })
+    .removeBackground({ images: files[0], output_dir: "relative/out" });
+  assert.equal(r.isError, true);
+  assert.match(text(r), /output_dir must be an absolute path/);
+});
+
+test("a leading ~ in output_dir expands to the home folder", async () => {
+  const { files, dir, env } = await setup();
+  const api = fakeApi({ png: await readFile(FIX) });
+  const r = await createHandlers({ env, makeApi: api.make, home: dir }).removeBackground({ images: files[0], output_dir: "~/out" });
+  assert.equal(r.isError, undefined);
+  assert.ok(existsSync(path.join(dir, "out", "p0-no-bg.png")));
+});
+
+test("an output_dir that cannot be created is refused before any image is sent", async () => {
+  const { files, dir, env } = await setup();
+  const blocker = path.join(dir, "blocked-file");
+  await writeFile(blocker, "x");
+  const api = fakeApi({ png: await readFile(FIX) });
+  const r = await createHandlers({ env, makeApi: api.make })
+    .removeBackground({ images: files[0], output_dir: path.join(blocker, "sub") });
+  assert.equal(r.isError, true);
+  assert.match(text(r), /cannot write to/i);
+  assert.equal(api.calls.length, 0);
+});
+
+test("a per-item folder that cannot be created fails only that image, before any API call for it", async () => {
+  const { dir, env } = await setup();
+  const blockerFile = path.join(dir, "blocked-home");
+  await writeFile(blockerFile, "x");
+  const api = fakeApi({ png: await readFile(FIX) });
+  const r = await createHandlers({ env, makeApi: api.make, home: blockerFile }).removeBackground({ images: "https://ex.com/pic.jpg" });
+  assert.equal(r.isError, true);
+  assert.match(text(r), /https:\/\/ex\.com\/pic\.jpg: failed — cannot write to/);
+  assert.equal(api.calls.length, 0);
+});
+
+test("a name that appears during the API call (a race) is not overwritten; the next name is used", async () => {
+  const { files } = await setup(1);
+  const png = await readFile(FIX);
+  const expectedFirst = files[0].replace(/\.jpg$/, "-no-bg.png");
+  const expectedSecond = files[0].replace(/\.jpg$/, "-no-bg-2.png");
+  let raced = false;
+  const make = () => ({
+    async removeBackground() {
+      if (!raced) { raced = true; await writeFile(expectedFirst, "raced-content"); }
+      return { bytes: png, credits: 0.25 };
+    },
+    async account() { return { credits: 100, freePreviews: 50 }; },
+  });
+  const r = await createHandlers({ env: (await setup()).env, makeApi: make }).removeBackground({ images: files[0] });
+  assert.equal(await readFile(expectedFirst, "utf8"), "raced-content");
+  assert.ok(existsSync(expectedSecond));
+  assert.ok(text(r).includes(path.basename(expectedSecond)));
+  assert.equal(r.isError, undefined);
 });
 
 test("get_credits reports balance and free previews", async () => {
@@ -104,7 +172,7 @@ test("get_credits reports balance and free previews", async () => {
   assert.equal(text(r), "Balance: 12 credits. Free previews left this month: 50.");
 });
 
-test("sign_in saves the approved key and reports the URL and code", async () => {
+test("sign_in returns immediately with the URL and code; approval is saved in the background", async () => {
   const { dir } = await setup();
   const env = { LASSOCUT_CONFIG: path.join(dir, "new.json") };
   const opened = [];
@@ -113,15 +181,59 @@ test("sign_in saves the approved key and reports the URL and code", async () => 
     connectStart: async () => ({ device_code: "d", user_code: "ABCD-EFGH", verification_url: "https://www.lassocut.com/connect/?code=ABCD-EFGH", interval: 0, expires_in: 600 }),
     connectPoll: async () => (++polls < 2 ? { status: "pending" } : { status: "approved", api_key: "newkey" }),
   });
-  const r = await createHandlers({ env, makeApi: make, openUrl: (u) => opened.push(u), sleep: async () => {} }).signIn({});
+  const h = createHandlers({ env, makeApi: make, openUrl: (u) => opened.push(u), sleep: async () => {} });
+  const r = await h.signIn({});
   assert.deepEqual(opened, ["https://www.lassocut.com/connect/?code=ABCD-EFGH"]);
-  assert.equal(JSON.parse(await readFile(env.LASSOCUT_CONFIG, "utf8")).api_key, "newkey");
-  assert.match(text(r), /Signed in to LassoCut/);
+  assert.match(text(r), /^Open https:\/\/www\.lassocut\.com\/connect\/\?code=ABCD-EFGH and approve the connection \(code ABCD-EFGH\)\. Then call get_credits to check\.$/);
   assert.doesNotMatch(text(r), /newkey/);
+  for (let i = 0; i < 100 && !existsSync(env.LASSOCUT_CONFIG); i++) await new Promise((res) => setTimeout(res, 5));
+  assert.equal(JSON.parse(await readFile(env.LASSOCUT_CONFIG, "utf8")).api_key, "newkey");
+});
+
+test("a second sign_in while one is pending reports the same URL and code without starting another", async () => {
+  const { dir } = await setup();
+  const env = { LASSOCUT_CONFIG: path.join(dir, "new2.json") };
+  let starts = 0;
+  const make = () => ({
+    connectStart: async () => { starts++; return { device_code: "d", user_code: "WXYZ-1234", verification_url: "https://www.lassocut.com/connect/?code=WXYZ-1234", interval: 0, expires_in: 600 }; },
+    connectPoll: async () => new Promise(() => {}), // never resolves: stays pending for the duration of the test
+  });
+  const h = createHandlers({ env, makeApi: make, openUrl: () => {}, sleep: async () => {} });
+  const r1 = await h.signIn({});
+  assert.match(text(r1), /Open https:\/\/www\.lassocut\.com\/connect\/\?code=WXYZ-1234/);
+  const r2 = await h.signIn({});
+  assert.match(text(r2), /^Sign-in in progress: open https:\/\/www\.lassocut\.com\/connect\/\?code=WXYZ-1234 \(code WXYZ-1234\)\.$/);
+  assert.equal(starts, 1);
+});
+
+test("an unsafe verification URL is never handed to the OS opener, but is still shown in text", async () => {
+  const { dir } = await setup();
+  const env = { LASSOCUT_CONFIG: path.join(dir, "unsafe.json") };
+  const opened = [];
+  const make = () => ({
+    connectStart: async () => ({ device_code: "d", user_code: "ZZZZ-9999", verification_url: 'https://ex.com/a"b', interval: 0, expires_in: 600 }),
+    connectPoll: async () => new Promise(() => {}),
+  });
+  const r = await createHandlers({ env, makeApi: make, openUrl: (u) => opened.push(u), sleep: async () => {} }).signIn({});
+  assert.deepEqual(opened, []);
+  assert.match(text(r), /https:\/\/ex\.com\/a"b/);
 });
 
 test("sign_in with an existing key does nothing unless force", async () => {
   const { env } = await setup();
   const r = await createHandlers({ env, makeApi: () => { throw new Error("no call expected"); } }).signIn({});
   assert.match(text(r), /Already signed in/);
+  assert.match(text(r), /Note: LASSOCUT_API_KEY is set and takes precedence\./);
+});
+
+test("sign_in with force still notes that LASSOCUT_API_KEY takes precedence over a newly saved key", async () => {
+  const { dir } = await setup();
+  const env = { LASSOCUT_CONFIG: path.join(dir, "new4.json"), LASSOCUT_API_KEY: "envkey" };
+  const make = () => ({
+    connectStart: async () => ({ device_code: "d", user_code: "AAAA-BBBB", verification_url: "https://www.lassocut.com/connect/?code=AAAA-BBBB", interval: 0, expires_in: 600 }),
+    connectPoll: async () => new Promise(() => {}),
+  });
+  const r = await createHandlers({ env, makeApi: make, openUrl: () => {}, sleep: async () => {} }).signIn({ force: true });
+  assert.match(text(r), /Open https:\/\/www\.lassocut\.com\/connect\/\?code=AAAA-BBBB/);
+  assert.match(text(r), /Note: LASSOCUT_API_KEY is set and takes precedence\./);
 });
