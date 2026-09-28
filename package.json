@@ -1,0 +1,48 @@
+{
+  "name": "lassocut-mcp",
+  "version": "1.0.0",
+  "description": "LassoCut background removal for AI assistants (MCP server): Claude Desktop, Claude Code, Cursor, Windsurf",
+  "type": "module",
+  "bin": {
+    "lassocut-mcp": "src/server.js"
+  },
+  "main": "src/server.js",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "mcpName": "io.github.jaupin94/lassocut-mcp",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "background-removal",
+    "remove-background",
+    "claude",
+    "cursor"
+  ],
+  "homepage": "https://www.lassocut.com/mcp/",
+  "author": "JAUPIN Design LLC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jaupin94/lassocut-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jaupin94/lassocut-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.1.0",
+    "jimp": "^1.6.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.1.0"
+  }
+}
