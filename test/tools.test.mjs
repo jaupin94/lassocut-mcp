@@ -284,7 +284,7 @@ test("a 402 mid-batch stops further calls; remaining images are reported skipped
 test("get_credits reports balance and free previews", async () => {
   const { env } = await setup();
   const r = await createHandlers({ env, makeApi: fakeApi({ balance: 12 }).make }).getCredits();
-  assert.equal(text(r), "Balance: 12 credits. Free previews left this month: 50.");
+  assert.equal(text(r), "Balance: 12 credits. Free previews available now: 50 (50 a month, up to 10 a day).");
 });
 
 test("sign_in returns immediately with the URL and code; approval is saved in the background", async () => {

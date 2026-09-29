@@ -150,7 +150,7 @@ export function createHandlers({ env = process.env, makeApi = createApi, openUrl
     if (!key) return say(NO_KEY, true);
     try {
       const a = await api(key).account();
-      return say(`Balance: ${a.credits} credits. Free previews left this month: ${a.freePreviews}.`);
+      return say(`Balance: ${a.credits} credits. Free previews available now: ${a.freePreviews} (50 a month, up to 10 a day).`);
     } catch (e) { return say(e.message, true); }
   }
 

@@ -6,7 +6,7 @@ Remove image backgrounds from your AI assistant with a [LassoCut](https://www.la
 
 Ask Claude (or any MCP-compatible assistant) to cut out product photos, portraits, whole folders, or images from a URL. Results are saved next to the originals as `<name>-no-bg.<ext>` and existing files are never overwritten — a name already taken gets `-2`, `-3`, and so on instead.
 
-By default, every image is processed as a low-cost **preview** (0.25 credit, 50 free per month). Full-size output costs 1 credit per image and is only used when you explicitly ask for it; above 10 full-size images, the assistant must show you the cost and get your OK first.
+By default, every image is processed as a low-cost **preview** (0.25 credit, 50 free a month, up to 10 a day). Full-size output costs 1 credit per image and is only used when you explicitly ask for it; above 10 full-size images, the assistant must show you the cost and get your OK first.
 
 ## Install
 
@@ -56,7 +56,7 @@ Files larger than 22 MB are skipped. Up to 3 small thumbnails are returned inlin
 
 ### `get_credits`
 
-Shows your current credit balance and the free previews left this month.
+Shows your current credit balance and the free previews available now (50 a month, up to 10 a day).
 
 ### `sign_in`
 

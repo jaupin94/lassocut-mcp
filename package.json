@@ -1,6 +1,6 @@
 {
   "name": "lassocut-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "LassoCut background removal for AI assistants (MCP server): Claude Desktop, Claude Code, Cursor, Windsurf",
   "type": "module",
   "bin": {

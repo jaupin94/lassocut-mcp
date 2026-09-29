@@ -16,7 +16,7 @@ function createServer(h) {
   const server = new McpServer({ name: "lassocut", version });
 
   server.registerTool("remove_background", {
-    description: "Remove the background of images with LassoCut. Accepts file paths, folders (their images, not subfolders) or http(s) URLs, up to 50 per call. Saves '<name>-no-bg.<ext>' next to each original (or in output_dir) and never overwrites. Uses size 'preview' (0.25 credit, 50 free per month) unless the user explicitly asks for full size.",
+    description: "Remove the background of images with LassoCut. Accepts file paths, folders (their images, not subfolders) or http(s) URLs, up to 50 per call. Saves '<name>-no-bg.<ext>' next to each original (or in output_dir) and never overwrites. Uses size 'preview' (0.25 credit, 50 free a month, up to 10 a day) unless the user explicitly asks for full size.",
     inputSchema: z.object({
       images: z.union([z.string(), z.array(z.string())]).describe("File path, folder path or http(s) URL, or a list of them"),
       size: z.enum(["preview", "full"]).optional().describe("preview (default) or full (1 credit per image, only if the user asks)"),
@@ -29,7 +29,7 @@ function createServer(h) {
   }, (args, extra) => h.removeBackground(args, extra));
 
   server.registerTool("get_credits", {
-    description: "Show the LassoCut credit balance and the free previews left this month.",
+    description: "Show the LassoCut credit balance and the free previews available now (50 a month, up to 10 a day).",
     inputSchema: z.object({}),
   }, () => h.getCredits());
 
