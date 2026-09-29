@@ -20,4 +20,7 @@ jobs:
         run: |
           curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
       - run: ./mcp-publisher login github-oidc
-      - run: ./mcp-publisher publish
+      # a fresh npm release can take a few minutes to become visible to the registry: retry for up to 15 minutes
+      - run: |
+          for i in $(seq 1 15); do ./mcp-publisher publish && exit 0; echo "retry in 60 s"; sleep 60; done
+          exit 1
