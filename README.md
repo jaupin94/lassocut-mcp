@@ -33,7 +33,7 @@ Requires Node.js 20 or later.
 You need a LassoCut account and API key. Three ways to connect:
 
 1. Ask the assistant to **sign in**. It calls the `sign_in` tool, which opens the LassoCut approval page in your browser and returns the approval link and a short code right away. Approve the connection in the browser, then ask the assistant to check your credits (`get_credits`) — the key is saved automatically in the background (the approval window stays open for a few minutes).
-2. Already signed in with the [`lassocut` command-line tool](https://www.lassocut.com/)? This connector reads the same saved key from `lassocut login`, so no extra step is needed.
+2. Already signed in with the [`lassocut` command-line tool](https://www.lassocut.com/migrate/cli/)? This connector reads the same saved key from `lassocut login`, so no extra step is needed.
 3. Set the `LASSOCUT_API_KEY` environment variable (or the `api_key` field in Claude Desktop's extension settings) to a key from your [LassoCut account page](https://www.lassocut.com/account/). This always takes precedence over a signed-in key.
 
 ## Tools

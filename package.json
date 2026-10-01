@@ -25,7 +25,9 @@
     "background-removal",
     "remove-background",
     "claude",
-    "cursor"
+    "cursor",
+    "mcp-server",
+    "image-processing"
   ],
   "homepage": "https://www.lassocut.com/mcp/",
   "author": "JAUPIN Design LLC",

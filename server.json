@@ -2,6 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.jaupin94/lassocut-mcp",
   "description": "Remove image backgrounds from AI assistants with a LassoCut account (files, folders, URLs).",
+  "websiteUrl": "https://www.lassocut.com/mcp/",
   "repository": { "url": "https://github.com/jaupin94/lassocut-mcp", "source": "github" },
   "version": "1.0.1",
   "packages": [
